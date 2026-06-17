@@ -111,7 +111,6 @@ Production deploys should go through CI, not local `pulumi up`.
 ## Design notes
 
 - **All Python** for app code; **Pulumi Python** for infra (matches ingestion/API stack).
-- **No Terraform, no shell deploy scripts** - CI owns the release path.
 - **Free tier first** - no global HTTPS LB or IAP; Firebase token auth at the app layer instead.
 - **Embeddings stored as `Vector(...)`** - required for Firestore vector indexes.
 - **Query cache** in `chat_history` avoids repeat LLM calls.
