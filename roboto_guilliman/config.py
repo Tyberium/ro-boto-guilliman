@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     gcp_project_id: str = "roboto-guilliman"
-    gcp_location: str = "us-central1"
+    gcp_location: str = "europe-west1"
 
     firestore_collection: str = "warhammer_rules_11th"
     firestore_database: str = "(default)"

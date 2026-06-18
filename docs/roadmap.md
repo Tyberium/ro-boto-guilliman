@@ -149,7 +149,7 @@ PRs run `quality` only (no deploy, no eval).
 0. **New GCP project setup** (one-time, outside CI - prerequisite for everything)
    - Create project `roboto-guilliman` in GCP console
    - Enable APIs: Cloud Run, Artifact Registry, Firestore, Vertex AI, Secret Manager
-   - Create Firestore `(default)` database (Native mode, `us-central1`) - API enable alone is not enough
+   - Create Firestore `(default)` database (Native mode, `europe-west1`) - API enable alone is not enough
    - Create Workload Identity Federation pool for GitHub Actions (keyless auth)
    - Create deployer service account with:
      - `roles/run.admin`, `roles/artifactregistry.admin`, `roles/datastore.user`, `roles/datastore.indexAdmin`, `roles/aiplatform.user`, `roles/secretmanager.admin`, `roles/iam.serviceAccountUser`, `roles/iam.serviceAccountAdmin`, `roles/resourcemanager.projectIamAdmin`, `roles/compute.viewer`

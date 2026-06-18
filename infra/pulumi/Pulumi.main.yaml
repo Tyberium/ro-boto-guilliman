@@ -1,6 +1,6 @@
 config:
   gcp:project: roboto-guilliman
-  gcp:region: us-central1
+  gcp:region: europe-west1
   roboto-guilliman:serviceName: roboto-guilliman
   roboto-guilliman:firestoreCollection: warhammer_rules_11th
   roboto-guilliman:maxInstances: "2"

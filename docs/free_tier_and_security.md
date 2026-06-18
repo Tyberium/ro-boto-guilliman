@@ -9,7 +9,7 @@ All infrastructure is Pulumi; all deploys run through GitHub Actions on push to 
 |---------|--------------------------|-------------|
 | Cloud Run | 2M requests/mo, 180k vCPU-s, 360k GiB-s | `min-instances=0`, `max-instances=2`, `256Mi`, `cpu_idle=true` |
 | Artifact Registry | 0.5 GB storage | Single service repo, tagged by git SHA |
-| Firestore | Spark: 1 GiB, 50k reads / 20k writes per day | `(default)` database in Native mode, `us-central1`; vector index uses native Firestore (no extra nodes) |
+| Firestore | Spark: 1 GiB, 50k reads / 20k writes per day | `(default)` database in Native mode, `europe-west1`; vector index uses native Firestore (no extra nodes) |
 | Vertex AI (Gemini Flash-Lite) | Pay-per-token, very low cost | Cache hits skip the LLM entirely |
 | Vertex AI (embeddings) | Ingest is one-off; queries are small | `text-embedding-004` at query time only |
 | GitHub Actions | 2,000 min/mo (private repo) | Test + deploy ~5-8 min per push |
@@ -45,6 +45,8 @@ roboto-guilliman uses **one GCP project** (`roboto-guilliman`) and **one Pulumi 
 - **Mission profile** - This is a club rules arbiter, not a payment or identity system. Brief downtime or a bad deploy is annoying, not catastrophic.
 
 If traffic or stakes grow later (paid tiers, public SLA), add a staging project then - not before there is a concrete need.
+
+All GCP resources use **`europe-west1`** (aligned with battleplan.uk).
 
 ## Pulumi stack (`infra/pulumi`)
 
