@@ -14,13 +14,19 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from roboto_guilliman.ingestion.source_registry import (
+    ParserProfile,
+    resolve_parser_profile,
+)
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_INDEX_URL = "https://www.warhammer-community.com/en-gb/downloads/warhammer-40000/"
 DOWNLOADS_API_URL = "https://www.warhammer-community.com/api/search/downloads/"
 DEFAULT_GAME_SYSTEM = "warhammer-40000"
 DEFAULT_LANGUAGE = "english"
-DEFAULT_OUTPUT_DIR = Path("data/rules_pdfs")
+DEFAULT_OUTPUT_DIR = Path("data/rules")
+LEGACY_OUTPUT_DIR = Path("data/rules_pdfs")
 MANIFEST_NAME = "manifest.json"
 USER_AGENT = (
     "roboto-guilliman/0.1 (+https://github.com/Tyberium/roboto-guilliman; rules-ingest-tool)"
@@ -36,6 +42,8 @@ class DownloadEntry:
     url: str
     filename: str
     category: str
+    parser_profile: ParserProfile
+    relative_path: str
 
 
 @dataclass
@@ -44,6 +52,8 @@ class ManifestRecord:
     url: str
     filename: str
     category: str
+    parser_profile: str
+    relative_path: str
     sha256: str
     bytes: int
     downloaded_at: str
@@ -79,12 +89,17 @@ def parse_api_hits(hits: list[dict[str, Any]]) -> list[DownloadEntry]:
         categories = hit.get("download_categories") or ["uncategorised"]
         category = categories[0] if categories else "uncategorised"
         title = hit.get("title") or _title_from_url(url)
+        filename = _safe_filename(title, url)
+        layout = resolve_parser_profile(title=title, gw_category=category)
+        relative_path = f"{layout.folder}/{filename}"
         entries.append(
             DownloadEntry(
                 title=title,
                 url=url,
-                filename=_safe_filename(title, url),
+                filename=filename,
                 category=category,
+                parser_profile=layout.parser_profile,
+                relative_path=relative_path,
             )
         )
     return entries
@@ -132,17 +147,29 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _normalise_manifest_item(item: dict[str, Any]) -> dict[str, Any]:
+    item = dict(item)
+    item.setdefault("category", "uncategorised")
+    layout = resolve_parser_profile(title=item["title"], gw_category=item["category"])
+    item["parser_profile"] = layout.parser_profile
+    item["relative_path"] = f"{layout.folder}/{item['filename']}"
+    return item
+
+
 def _load_manifest(path: Path) -> dict[str, ManifestRecord]:
     if not path.exists():
         return {}
     raw = json.loads(path.read_text(encoding="utf-8"))
     records: dict[str, ManifestRecord] = {}
     for item in raw:
-        if "category" not in item:
-            item["category"] = "uncategorised"
-        record = ManifestRecord(**item)
+        record = ManifestRecord(**_normalise_manifest_item(item))
         records[record.url] = record
     return records
+
+
+def pdf_path(output_dir: Path, record: ManifestRecord | DownloadEntry) -> Path:
+    relative = record.relative_path
+    return output_dir / relative
 
 
 def _save_manifest(path: Path, records: dict[str, ManifestRecord]) -> None:
@@ -159,7 +186,7 @@ def download_pdf(
     force: bool,
     manifest: dict[str, ManifestRecord],
 ) -> tuple[str, ManifestRecord]:
-    output_path = output_dir / entry.filename
+    output_path = pdf_path(output_dir, entry)
     existing = manifest.get(entry.url)
     if not force and output_path.exists() and existing and existing.sha256:
         logger.info("Skip (already downloaded): %s", entry.title)
@@ -176,19 +203,122 @@ def download_pdf(
         logger.info("Skip (unchanged): %s", entry.title)
         return "skipped", existing
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(data)
     record = ManifestRecord(
         title=entry.title,
         url=entry.url,
         filename=entry.filename,
         category=entry.category,
+        parser_profile=entry.parser_profile,
+        relative_path=entry.relative_path,
         sha256=digest,
         bytes=len(data),
         downloaded_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     )
-    logger.info("Downloaded %s (%s bytes)", entry.title, len(data))
+    logger.info(
+        "Downloaded %s -> %s (%s bytes)",
+        entry.title,
+        record.relative_path,
+        len(data),
+    )
     return "downloaded", record
+
+
+def migrate_legacy_layout(
+    *,
+    legacy_dir: Path = LEGACY_OUTPUT_DIR,
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    dry_run: bool = False,
+) -> tuple[int, int]:
+    """Move flat PDFs from data/rules_pdfs/ into parser-profile subfolders."""
+    legacy_manifest_path = legacy_dir / MANIFEST_NAME
+    if not legacy_manifest_path.exists():
+        logger.warning("No legacy manifest at %s", legacy_manifest_path)
+        return 0, 0
+
+    manifest = _load_manifest(legacy_manifest_path)
+    moved = 0
+    skipped = 0
+
+    for record in manifest.values():
+        legacy_path = legacy_dir / record.filename
+        target_path = pdf_path(output_dir, record)
+        if target_path.exists():
+            skipped += 1
+            continue
+        if not legacy_path.exists():
+            logger.warning("Missing legacy file: %s", legacy_path)
+            skipped += 1
+            continue
+        if dry_run:
+            logger.info("Would move %s -> %s", legacy_path, target_path)
+        else:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            legacy_path.rename(target_path)
+            logger.info("Moved %s -> %s", legacy_path.name, record.relative_path)
+        moved += 1
+
+    if not dry_run and moved:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        _save_manifest(output_dir / MANIFEST_NAME, manifest)
+
+    return moved, skipped
+
+
+def reconcile_rules_layout(
+    *,
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    dry_run: bool = False,
+) -> tuple[int, int]:
+    """Move PDFs to match current parser-profile folders and refresh manifest paths."""
+    manifest_path = output_dir / MANIFEST_NAME
+    if not manifest_path.exists():
+        logger.warning("No manifest at %s", manifest_path)
+        return 0, 0
+
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    records: dict[str, ManifestRecord] = {}
+    moved = 0
+    skipped = 0
+
+    for item in raw:
+        previous_path = item.get("relative_path")
+        normalised = _normalise_manifest_item(item)
+        record = ManifestRecord(**normalised)
+        records[record.url] = record
+        target_path = pdf_path(output_dir, record)
+
+        candidate_paths = [
+            output_dir / previous_path if previous_path else None,
+            output_dir / record.filename,
+            output_dir / "core_rules" / record.filename,
+        ]
+        source_path = next(
+            (
+                path
+                for path in candidate_paths
+                if path is not None and path.exists() and path != target_path
+            ),
+            None,
+        )
+        if target_path.exists():
+            skipped += 1
+            continue
+        if source_path is None:
+            continue
+        if dry_run:
+            logger.info("Would move %s -> %s", source_path, target_path)
+        else:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.rename(target_path)
+            logger.info("Moved %s -> %s", source_path.name, record.relative_path)
+        moved += 1
+
+    if not dry_run:
+        _save_manifest(manifest_path, records)
+
+    return moved, skipped
 
 
 def download_all(
@@ -224,10 +354,11 @@ def download_all(
         logger.info("[%s/%s] %s", index, len(entries), entry.title)
         if dry_run:
             logger.info(
-                "Dry run: would download %s -> %s (%s)",
+                "Dry run: would download %s -> %s (%s, %s)",
                 entry.url,
-                entry.filename,
+                entry.relative_path,
                 entry.category,
+                entry.parser_profile,
             )
             continue
 
@@ -273,6 +404,7 @@ def download_all(
 
     if not dry_run:
         _save_manifest(manifest_path, manifest)
+        reconcile_rules_layout(output_dir=output_dir)
 
     return downloaded, skipped, failed
 
@@ -327,12 +459,51 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="List discovered PDFs without downloading.",
     )
+    parser.add_argument(
+        "--migrate-legacy",
+        action="store_true",
+        help="Move PDFs from data/rules_pdfs/ into parser-profile subfolders under --output-dir.",
+    )
+    parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Move PDFs into current parser-profile folders (e.g. Sep 2024 core rules -> excluded/).",
+    )
     return parser
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = build_parser().parse_args()
+
+    if args.migrate_legacy:
+        moved, skipped = migrate_legacy_layout(
+            output_dir=args.output_dir,
+            dry_run=args.dry_run,
+        )
+        if not args.dry_run:
+            reconcile_rules_layout(output_dir=args.output_dir)
+        logger.info(
+            "Migration done: moved=%s skipped=%s (output=%s)",
+            moved,
+            skipped,
+            args.output_dir,
+        )
+        return
+
+    if args.reconcile:
+        moved, skipped = reconcile_rules_layout(
+            output_dir=args.output_dir,
+            dry_run=args.dry_run,
+        )
+        logger.info(
+            "Reconcile done: moved=%s skipped=%s (output=%s)",
+            moved,
+            skipped,
+            args.output_dir,
+        )
+        return
+
     downloaded, skipped, failed = download_all(
         game_system=args.game_system,
         language=args.language,

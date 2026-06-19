@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from roboto_guilliman.config import Settings, get_settings
 from roboto_guilliman.gemini_client import GeminiArbiter
-from roboto_guilliman.prompts import RetrievedChunk
+from roboto_guilliman.prompts import RetrievedChunk, is_legacy_edition_query, legacy_edition_refusal
 from roboto_guilliman.retriever import ChatHistoryCache, RulesRetriever
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,13 @@ def ask_rules(
     query = body.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query must not be empty.")
+
+    if is_legacy_edition_query(query):
+        return AskResponse(
+            answer=legacy_edition_refusal(),
+            cached=False,
+            context_chunks=[],
+        )
 
     cached_answer: str | None = None
     if body.use_cache:

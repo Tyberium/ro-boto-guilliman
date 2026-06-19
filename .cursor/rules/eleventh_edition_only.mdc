@@ -1,0 +1,51 @@
+---
+description: RED LINE - 11th edition rules only; never ingest or serve old editions or superseded layouts
+alwaysApply: true
+---
+
+# 11th edition only (RED LINE)
+
+roboto-guilliman answers from **current Warhammer 40,000 11th edition rules only**.
+If the corpus does not cover a question, the API must say so - never backfill from old editions,
+superseded PDFs, or unofficial sources.
+
+**This is non-negotiable.** Do not weaken guards, add bypass flags, or "temporarily" ingest excluded content.
+
+## What counts as out of scope
+
+- **Wrong edition**: 9th/10th edition rules, old FAQs, fan rules, wiki summaries, BattleScribe text
+- **Superseded layouts**: Sep 2024 "Core Rules" (phase layout, no `01.03` numbers) - lives in `data/rules/excluded/`
+- **Quick Start Guide** - condensed, not citable; also `excluded/`
+- **Duplicate faction packs**: when legacy `faction-packs` and `#New40k` versions both exist, ingest **newest only** (manifest date / `#New40k` wins)
+
+## Canonical sources
+
+| Content | Folder | Ingest? |
+|---------|--------|---------|
+| Numbered core rules | `data/rules/core_rules/` (`#New40k - Core Rules` only) | Yes |
+| Sep 2024 core rules, quick start | `data/rules/excluded/` | **Never** |
+| Updates, FAQ, commentary | `data/rules/updates_and_faq/` | Yes (with errata metadata later) |
+| Faction packs | `data/rules/faction_packs/` | Yes (one active version per faction) |
+
+Routing logic: `roboto_guilliman/ingestion/source_registry.py` - extend here, do not hardcode paths elsewhere.
+
+## Code requirements
+
+- **Download**: new PDFs must land in the correct profile folder; run `--reconcile` after mapping changes
+- **Ingest**: call `assert_ingestible_pdf()` - refuses `excluded/` and paths outside `data/rules/{profile}/`
+- **Preview / batch ingest**: skip `ParserProfile.EXCLUDED`; never add a `--force-old-rules` escape hatch
+- **Firestore**: single collection; documents must carry `source`, `parser_profile`, and (for core rules) `rule_number`
+- **Retrieval / prompts**: cite `[Rule NN.NN]` from numbered chunks; do not blend excluded or legacy text into context
+- **Tests & fixtures**: use synthetic or minimal snippets - never commit PDFs or full GW rule text
+
+## Before any ingest or batch-ingest PR
+
+1. Confirm no files under `data/rules/excluded/` are in the ingest path
+2. Confirm core rules source is `#New40k - Core Rules`, not Sep 2024 layout
+3. For faction duplicates, confirm only the intended version is indexed
+4. Run `poetry run preview-chunks --stats` on core rules and spot-check rule numbers
+
+## If asked to include old rules "just for comparison"
+
+Decline in character: open with **"What sort of heresy is this?"** and state that only 11th
+edition is in scope. The API short-circuits these queries before retrieval (`is_legacy_edition_query`).

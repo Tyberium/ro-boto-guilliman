@@ -15,6 +15,7 @@ index does not cover an interaction, and caches repeat questions in Firestore.
 | Layer | Tech |
 |-------|------|
 | Rules corpus | `download-rules` CLI → Warhammer Community downloads API |
+| Chunk preview | `preview-chunks` CLI → rule-number parsing (`core_rules` profile) |
 | Ingestion | Python, PyMuPDF, `text-embedding-004` |
 | Vector store | Firestore native vector search (768-dim, COSINE) |
 | LLM | Gemini 2.5 Flash-Lite via Vertex AI |
@@ -35,8 +36,20 @@ roboto-guilliman/
     api/              # FastAPI Cloud Run service
     ingestion/
       download_rules.py   # sync PDFs from GW downloads API
+      preview_chunks.py   # eyeball chunk boundaries before ingest
       ingest_rules.py     # chunk + embed + Firestore write
-  data/rules_pdfs/  # local PDF cache (gitignored)
+      source_registry.py  # parser profiles + ingest guards
+      parsers/core_rules.py
+  .cursor/rules/
+    eleventh_edition_only.mdc  # RED LINE: 11th ed only, never ingest excluded/
+  data/rules/       # parser-profile folders (.gitkeep committed; PDFs gitignored)
+    core_rules/     # #New40k numbered rules only (Firestore source)
+    excluded/       # Sep 2024 layout + quick start (never ingested)
+    updates_and_faq/
+    reference/
+    faction_packs/
+    event_companions/
+    miscellaneous/
   infra/pulumi/     # Pulumi stack (Cloud Run, IAM, vector index, Artifact Registry)
   .github/workflows/ci.yml
   tests/
@@ -71,7 +84,25 @@ poetry run download-rules --dry-run    # list what would be downloaded
 poetry run download-rules --force      # re-download even if manifest matches
 ```
 
-Output: `data/rules_pdfs/` + `data/rules_pdfs/manifest.json` (never committed).
+Output: `data/rules/{parser_profile}/` + `data/rules/manifest.json` (PDFs and manifest are gitignored).
+
+If you already downloaded into the old flat `data/rules_pdfs/` layout:
+
+```bash
+poetry run download-rules --migrate-legacy
+```
+
+### Preview chunks (before ingest)
+
+Inspect rule boundaries without touching Firestore. The canonical core rules source is
+`#New40k - Core Rules` (numbered `01.03` rules). The Sep 2024 layout PDF and Quick Start
+live under `data/rules/excluded/` and are blocked from ingest.
+
+```bash
+poetry run preview-chunks --stats
+poetry run preview-chunks --limit 10
+poetry run download-rules --reconcile   # move mis-filed PDFs (e.g. into excluded/)
+```
 
 Politeness defaults: sequential requests, 5s delay, identifying User-Agent, backoff on
 429/503. See `.cursor/rules/gw_rules_downloads.mdc` for conventions when extending this.
@@ -82,7 +113,7 @@ The Firestore vector index is created by Pulumi on first deploy. For local inges
 ensure the index exists (run `pulumi up` once, or deploy via CI).
 
 ```bash
-poetry run ingest-rules data/rules_pdfs/core_rules__*.pdf --source-name core_rules_11th
+poetry run ingest-rules data/rules/core_rules/new40k_-_core_rules__*.pdf --source-name core_rules_11th
 ```
 
 Dry-run parsing only:
@@ -103,6 +134,14 @@ poetry run serve
 curl -s -X POST http://localhost:8080/v1/ask \
   -H "Content-Type: application/json" \
   -d '{"query": "What happens when a unit fails a Battle-shock test?"}' | jq
+```
+
+Prior-edition questions are rejected before retrieval (no LLM call):
+
+```bash
+curl -s -X POST http://localhost:8080/v1/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query": "How did coherency work in 9th edition?"}' | jq
 ```
 
 Smoke test against production:
@@ -149,14 +188,16 @@ Production deploys should go through CI, not local `pulumi up`.
 - **All Python** for app code; **Pulumi Python** for infra (matches ingestion/API stack).
 - **Free tier first** - no global HTTPS LB or IAP; Firebase token auth at the app layer instead.
 - **Embeddings stored as `Vector(...)`** - required for Firestore vector indexes.
+- **11th edition only** - superseded PDFs live in `data/rules/excluded/` and are blocked at ingest. `/v1/ask` refuses prior-edition queries in character (*"What sort of heresy is this?"*). See `.cursor/rules/eleventh_edition_only.mdc`.
 - **Query cache** in `chat_history` avoids repeat LLM calls.
 - **Rules corpus** - downloaded locally via GW's public API; ingested to private Firestore only.
 
 ## Next steps
 
-- [ ] Batch ingest downloaded PDFs into `warhammer_rules_11th`
+- [ ] Batch ingest downloaded PDFs into `warhammer_rules_11th` (start with `#New40k` core rules)
+- [ ] Wire `core_rules` parser into `ingest-rules`
 - [ ] Firebase ID token middleware on `/v1/ask`
-- [ ] Tune chunking against real 11th ed PDF structure (tables, datasheets)
+- [ ] Faction pack + table chunking (Phase 4a)
 - [ ] Scheduled `download-rules` refresh when GW publishes errata
 - [ ] Embed chat UI in battleplan.uk
 

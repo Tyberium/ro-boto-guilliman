@@ -15,12 +15,15 @@
 | Chat history cache | ✅ Live | SHA-256 keyed, skips LLM on cache hit |
 | Gemini 2.5 Flash-Lite | ✅ Wired | Vertex AI, `temperature=0.2`, no hallucination persona |
 | `text-embedding-004` | ✅ Wired | Separate task types for doc/query |
-| Recursive chunker | ✅ Tested | Paragraph-aware, ALL-CAPS section hint detection |
+| Recursive chunker | ✅ Tested | Paragraph-aware fallback; `core_rules` uses rule-number parser (137 chunks) |
+| Preview chunks CLI | ✅ Working | `poetry run preview-chunks` for `#New40k` core rules |
+| Source registry | ✅ Working | Parser profiles, `excluded/` quarantine, ingest guards |
+| Legacy edition guard | ✅ Working | `/v1/ask` refuses 9th/10th ed queries before retrieval |
 | Download CLI | ✅ Working | `poetry run download-rules` via GW public downloads API (~72 PDFs) |
 | Ingest CLI | ✅ Working | `poetry run ingest-rules`, batch commits to Firestore |
 | Pulumi IaC | ✅ CI-managed | Python, `main` stack, Artifact Registry + Cloud Run |
 | GitHub Actions CI | ✅ Passing | ruff → pytest → Docker build → `pulumi up` → smoke test `/health` |
-| Local rules corpus | ✅ Downloaded | `data/rules_pdfs/` + manifest (~825 MB, gitignored) |
+| Local rules corpus | ✅ Downloaded | `data/rules/{parser_profile}/` + manifest (~825 MB, gitignored) |
 
 ### Rules download pipeline (implemented)
 
@@ -43,6 +46,8 @@ and legacy), miscellaneous.
 
 | Gap | Impact | Phase |
 |-----|--------|-------|
+| No chunking strategy implemented | Core rules parser done; faction packs still flat text | 4a |
+| No chunk preview CLI | Other profiles still lack preview parsers | 4a |
 | Firestore corpus empty | API returns "no relevant rule text" until ingest runs | 5 |
 | No batch ingest | 72 PDFs downloaded locally; ingest is still one PDF at a time | 5 |
 | No auth on `/v1/ask` | Anyone can drain your Vertex AI quota | 1 |
@@ -58,7 +63,97 @@ and legacy), miscellaneous.
 
 ---
 
-## 2. Architecture Target State
+## 2. Chunking and data model (locked)
+
+Decisions agreed before bulk ingest. PDF layout mirrors parser profiles in
+`roboto_guilliman/ingestion/source_registry.py`.
+
+### Firestore: one collection, one vector index
+
+Keep the existing `(default)` database and single collection `warhammer_rules_11th`
+with one COSINE vector index on `embedding`. Do **not** split into per-faction or
+per-PDF-type collections.
+
+**Why:** Players ask cross-cutting questions ("Can Orks use this core rule stratagem?").
+One index means one `find_nearest` call. Firestore supports metadata pre-filters on
+`parser_profile`, `faction`, `status`, etc. Multiple collections would need multiple
+indexes, multi-query fusion, and more free-tier overhead for no retrieval gain.
+
+**Document schema (target):**
+
+| Field | Purpose |
+|-------|---------|
+| `text` | Chunk body (includes rule number in text for embedding) |
+| `embedding` | 768-dim `text-embedding-004` vector |
+| `parser_profile` | Which chunker produced this row |
+| `chunk_type` | `core_rule`, `stratagem`, `datasheet`, `mission`, `table`, `faq` |
+| `rule_number` | e.g. `01.03` (core rules citation) |
+| `parent_section` | Unit name, mission name, detachment |
+| `faction` | When applicable |
+| `source` | Stable slug, e.g. `core_rules_11th`, `orks` |
+| `source_category` | Raw GW API category (audit) |
+| `page` | PDF page number |
+| `has_figure` | Page/chunk contains diagram-heavy content |
+| `figure_description` | Vision caption stored at ingest (searchable text) |
+| `page_image_uri` | Optional cached page PNG for query-time multimodal |
+| `status` / `superseded_by` / `effective_date` | Errata override (Phase 4c) |
+
+Retrieval: vector (+ later BM25) on text only. Images are a **generation-time**
+enrichment when `has_figure` is set, not embedded.
+
+### Local PDF folders (= parser profiles)
+
+```
+data/rules/
+  manifest.json
+  core_rules/           # #New40k numbered rules only (Firestore ingest)
+  excluded/             # Sep 2024 layout core rules, quick start (local only)
+  updates_and_faq/      # Q&A, rules commentary
+  reference/            # Balance Dataslate, Munitorum tables
+  faction_packs/        # stratagems, datasheets, abilities
+  event_companions/     # missions, deployment, scoring
+  miscellaneous/        # fallback recursive split
+```
+
+GW API categories (`new40k`, `faction-packs`, …) are messy; folder placement uses
+title + category heuristics in `source_registry.py`.
+
+### Chunking by parser profile
+
+| Profile | Boundary | Overlap |
+|---------|----------|---------|
+| `core_rules` | One chunk per rule number | None across rules | `#New40k` PDF only (137 rules). Sep 2024 + Quick Start → `excluded/` (never ingested). |
+| `updates_and_faq` | One Q+A or errata block | None |
+| `reference` | One table row / detachment block | None |
+| `faction_packs` | Stratagem, ability, or unit datasheet | None across units |
+| `event_companions` | Mission / deployment section | None |
+| `miscellaneous` | Recursive split (current chunker) | 200 chars |
+
+### Figures and diagrams
+
+1. **Ingest:** detect image-heavy pages via PyMuPDF block layout; run Gemini vision
+   once per flagged page; store `figure_description` on linked chunks.
+2. **Query:** text retrieval as today; if top hits have `has_figure` and caption is
+   thin, attach cached page PNG to the LLM call (multimodal answer path).
+3. **Do not** embed image pixels in Firestore vectors.
+
+### Legacy edition requests (API)
+
+`/v1/ask` runs `is_legacy_edition_query()` before cache or retrieval. Prior-edition
+questions (9th, 10th, "old rules", etc.) get an in-character refusal opening with
+*"What sort of heresy is this?"* - no Firestore read, no Gemini call. Enforced in code
+and documented in `.cursor/rules/eleventh_edition_only.mdc`.
+
+### Pre-ingest workflow (next implementation steps)
+
+1. `preview-chunks` CLI - print N sample chunks per PDF, no Firestore write. **Done for `core_rules`.**
+2. Implement `core_rules` rule-number parser; validate on `data/rules/core_rules/`.
+3. Add figure detection + vision caption pass.
+4. Batch ingest with `--only-changed` against manifest SHA256.
+
+---
+
+## 3. Architecture Target State
 
 ```
                        ┌─────────────────────────────────────────┐
@@ -98,7 +193,7 @@ and legacy), miscellaneous.
 
 ---
 
-## 3. Technology Decisions (Zero-Cost Stack)
+## 4. Technology Decisions (Zero-Cost Stack)
 
 | Concern | Chosen solution | Free tier / cost |
 |---------|----------------|-----------------|
@@ -115,13 +210,13 @@ and legacy), miscellaneous.
 | Rate limiting | Firestore counters (no Redis needed) | Uses free Firestore quota |
 | Evaluation | `ragas` (offline, runs in CI) | Open-source, no hosted service needed |
 | Secrets | GitHub Actions secrets + Cloud Run env vars | Free |
-| PDF storage (ingest source) | Local `data/rules_pdfs/` (gitignored); GCS optional in Phase 5 | Free |
+| PDF storage (ingest source) | Local `data/rules/{parser_profile}/` (gitignored); GCS optional in Phase 5 | Free |
 
 **Twilio note:** Using a dedicated Twilio number (~$1/mo) from day one. This avoids the sandbox join-code step entirely - members just message the bot number directly or add it to the group. It is the only deliberate spend in the stack.
 
 ---
 
-## 4. CI Pipeline - Full Target Definition
+## 5. CI Pipeline - Full Target Definition
 
 Every merge to `main` runs this pipeline in order. Gates are enforced - a failed gate blocks deploy.
 
@@ -151,7 +246,7 @@ PRs run `quality` only (no deploy, no eval).
 
 ---
 
-## 5. Implementation Phases
+## 6. Implementation Phases
 
 ---
 
@@ -496,12 +591,12 @@ errata via `download-rules`, then re-ingest changed PDFs only.
 
 **Prerequisites (done):**
 - `poetry run download-rules` syncs ~72 English WH40K PDFs via GW public API
-- Manifest at `data/rules_pdfs/manifest.json` tracks SHA256 per file
+- Manifest at `data/rules/manifest.json` tracks SHA256 per file
 
 **Implementation tasks:**
 
 1. **Batch ingest CLI** (`ingest_rules.py` or new `ingest_all.py`)
-   - Walk `data/rules_pdfs/manifest.json`, run `ingest-rules` per PDF
+   - Walk `data/rules/manifest.json`, run `ingest-rules` per PDF
    - `--source-name` derived from manifest title + category slug
    - `--only-changed` skips PDFs whose SHA256 matches last ingested hash in Firestore metadata
    - Rate-limit embedding batches to stay within Vertex free quota
@@ -560,7 +655,7 @@ errata via `download-rules`, then re-ingest changed PDFs only.
 
 ---
 
-## 6. Phase Delivery Order & Dependencies
+## 7. Phase Delivery Order & Dependencies
 
 ```
 Phase 1 (Security)
@@ -585,7 +680,7 @@ Phases 4 and 5 are independent of each other within their phase.
 
 ---
 
-## 7. Effort Estimates
+## 8. Effort Estimates
 
 | Phase | Complexity | Estimated Sessions |
 |-------|-----------|-------------------|
@@ -602,7 +697,7 @@ Phases 4 and 5 are independent of each other within their phase.
 
 ---
 
-## 8. "Definition of Done" per Phase
+## 9. "Definition of Done" per Phase
 
 A phase is complete when:
 - [ ] All implementation tasks listed above are committed
@@ -614,7 +709,7 @@ A phase is complete when:
 
 ---
 
-## 9. Open Questions / Decisions Needed
+## 10. Open Questions / Decisions Needed
 
 1. **WhatsApp group vs DM:** ✅ Decided. Bot is added to the group and responds **only when @mentioned** (`@roboto`). All other group traffic is silently ignored. DMs to the bot number also work (no mention needed in a 1:1 conversation). This is the correct UX - no noise, no accidental triggers.
 
@@ -623,7 +718,7 @@ A phase is complete when:
 3. **Twilio number:** Using a dedicated WhatsApp Business number via Twilio (~$1/mo) from day one. No sandbox, no join-code friction. The number is provisioned manually once; everything after that (webhook config, secret rotation) is CI-managed.
 
 4. **Rules PDF distribution rights:** GW rules are copyright. PDFs stay in gitignored
-   `data/rules_pdfs/`; ingest chunks go to private Firestore only. Use GW's public downloads
+   `data/rules/`; ingest chunks go to private Firestore only. Use GW's public downloads
    API politely (see `.cursor/rules/gw_rules_downloads.mdc`). The CV portfolio can reference
    the architecture without exposing rules text.
 

@@ -1,6 +1,13 @@
 """Tests for prompt formatting."""
 
-from roboto_guilliman.prompts import RetrievedChunk, build_cache_key, build_user_prompt, format_context
+from roboto_guilliman.prompts import (
+    RetrievedChunk,
+    build_cache_key,
+    build_user_prompt,
+    format_context,
+    is_legacy_edition_query,
+    legacy_edition_refusal,
+)
 
 
 def test_format_context_includes_citation():
@@ -36,3 +43,20 @@ def test_build_user_prompt_includes_query():
 
 def test_cache_key_normalizes_whitespace_and_case():
     assert build_cache_key("  Foo Bar ") == build_cache_key("foo bar")
+
+
+def test_is_legacy_edition_query_detects_old_editions():
+    assert is_legacy_edition_query("How did coherency work in 9th edition?")
+    assert is_legacy_edition_query("10th ed blast rules")
+    assert is_legacy_edition_query("previous edition rules for overwatch")
+
+
+def test_is_legacy_edition_query_allows_current_edition_questions():
+    assert not is_legacy_edition_query("What is a Battle-shock test in 11th edition?")
+    assert not is_legacy_edition_query("Can Orks use a stratagem in the fight phase?")
+
+
+def test_legacy_edition_refusal_is_in_character():
+    answer = legacy_edition_refusal()
+    assert "heresy" in answer.lower()
+    assert "11th edition" in answer

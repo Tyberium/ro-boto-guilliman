@@ -14,6 +14,7 @@ from google.cloud.firestore_v1.vector import Vector
 from roboto_guilliman.chunking import TextChunk, chunk_page_text
 from roboto_guilliman.config import Settings, get_settings
 from roboto_guilliman.embeddings import EmbeddingService
+from roboto_guilliman.ingestion.source_registry import assert_ingestible_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,8 @@ def main() -> None:
 
     if not args.pdf_path.exists():
         raise SystemExit(f"PDF not found: {args.pdf_path}")
+
+    assert_ingestible_pdf(args.pdf_path)
 
     logger.info("Extracting chunks from %s", args.pdf_path)
     chunks = extract_chunks_from_pdf(

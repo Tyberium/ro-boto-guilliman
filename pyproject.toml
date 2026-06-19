@@ -24,6 +24,7 @@ ruff = "^0.8.0"
 [tool.poetry.scripts]
 download-rules = "roboto_guilliman.ingestion.download_rules:main"
 ingest-rules = "roboto_guilliman.ingestion.ingest_rules:main"
+preview-chunks = "roboto_guilliman.ingestion.preview_chunks:main"
 serve = "roboto_guilliman.api.main:run"
 
 [build-system]

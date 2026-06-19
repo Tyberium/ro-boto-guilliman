@@ -6,6 +6,8 @@ alwaysApply: false
 
 # GW rules downloads (Warhammer Community)
 
+**RED LINE:** See `.cursor/rules/eleventh_edition_only.mdc` - old editions and superseded layouts must never reach Firestore or the API.
+
 Use the **official downloads search API**, not HTML scraping or headless browsers.
 
 ## Discovery
@@ -33,12 +35,17 @@ Human index page (reference only): https://www.warhammer-community.com/en-gb/dow
 - **Default 5s delay** between PDF fetches (`--delay` to increase if needed)
 - **Identifying User-Agent**: `roboto-guilliman/0.1 (+https://github.com/Tyberium/roboto-guilliman; rules-ingest-tool)`
 - **Backoff** on HTTP 429/503 (exponential, cap 120s)
-- **Skip unchanged** files via SHA256 manifest at `data/rules_pdfs/manifest.json`
+- **Skip unchanged** files via SHA256 manifest at `data/rules/manifest.json`
 - **Never run bulk download in CI** unless explicitly requested - manual or scheduled local/job only
 
 ## Storage and copyright
 
-- Save PDFs under `data/rules_pdfs/` (gitignored)
+- Save PDFs under `data/rules/{parser_profile}/` (gitignored). Profiles match chunking strategy:
+  `core_rules`, `updates_and_faq`, `reference`, `faction_packs`, `event_companions`, `miscellaneous`, `excluded`
+- `excluded/` holds Sep 2024 layout core rules and quick start - **never ingested** (see `eleventh_edition_only.mdc`)
+- Mapping lives in `roboto_guilliman/ingestion/source_registry.py`
+- Legacy flat layout: `poetry run download-rules --migrate-legacy`
+- Re-file PDFs after mapping changes: `poetry run download-rules --reconcile`
 - **Never commit** PDFs or rules text to the repo
 - Ingest chunks go to **private** Firestore only; do not expose GW content in docs, demos, or logs
 
@@ -50,4 +57,4 @@ poetry run download-rules --dry-run    # list only
 poetry run download-rules --force      # re-download all
 ```
 
-After download, ingest with `poetry run ingest-rules` per PDF or a future batch ingest command.
+After download, inspect chunks with `poetry run preview-chunks` before ingest.
