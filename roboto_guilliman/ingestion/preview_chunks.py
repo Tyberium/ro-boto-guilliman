@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from roboto_guilliman.ingestion.parsers.core_rules import CoreRuleChunk, parse_core_rules_pdf
-from roboto_guilliman.ingestion.source_registry import ParserProfile, assert_ingestible_pdf, profile_from_path
+from roboto_guilliman.ingestion.source_registry import ParserProfile, profile_from_path
 
 logger = logging.getLogger(__name__)
 

@@ -61,6 +61,7 @@ roboto-guilliman/
 cd github/repositories/roboto-guilliman
 cp .env.example .env
 poetry install
+poetry run pre-commit install   # ruff + pytest before each commit (same as CI Test job)
 poetry run pytest
 ```
 
@@ -154,7 +155,7 @@ curl -s https://roboto-guilliman-wifsng2koa-ew.a.run.app/health
 
 Push to `main` runs:
 
-1. **Test** - ruff + pytest on every PR and push
+1. **Test** - ruff + pytest on every PR and push (also enforced locally via pre-commit)
 2. **Build and Deploy** (main only) - Pulumi bootstrap, push image to Artifact Registry
    (`europe-west1`), `pulumi up`, smoke test `/health`
 

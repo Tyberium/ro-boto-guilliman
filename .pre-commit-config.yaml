@@ -1,0 +1,20 @@
+# Mirrors the CI "Test" job (.github/workflows/ci.yml): ruff then pytest.
+# Install: poetry run pre-commit install
+# Run manually: poetry run pre-commit run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (CI Test step)
+        entry: python scripts/pre_commit_ruff.py
+        language: system
+        pass_filenames: false
+        files: ^(roboto_guilliman/|tests/|scripts/pre_commit_|pyproject\.toml)
+
+      - id: pytest
+        name: pytest (CI Test step)
+        entry: python scripts/pre_commit_pytest.py
+        language: system
+        pass_filenames: false
+        files: ^(roboto_guilliman/|tests/|scripts/pre_commit_|pyproject\.toml)
