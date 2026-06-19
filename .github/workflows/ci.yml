@@ -120,6 +120,8 @@ jobs:
         with:
           context: .
           push: true
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.ARTIFACT_REGISTRY }}:latest
             ${{ env.ARTIFACT_REGISTRY }}:sha-${{ github.sha }}
