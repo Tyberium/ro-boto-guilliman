@@ -6,4 +6,4 @@ config:
   roboto-guilliman:maxInstances: "2"
   roboto-guilliman:memory: 256Mi
   # Set by GitHub Actions on deploy: pulumi config set image <uri>
-  roboto-guilliman:image: us-docker.pkg.dev/cloudrun/container/hello
+  roboto-guilliman:image: us-docker.pkg.dev/cloudrun/container/hello:latest

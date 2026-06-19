@@ -9,7 +9,7 @@ on:
 env:
   GCP_PROJECT_ID: roboto-guilliman
   GCP_REGION: europe-west1
-  ARTIFACT_REGISTRY: europe-west1-docker.pkg.dev/roboto-guilliman/roboto-guilliman
+  ARTIFACT_REGISTRY: europe-west1-docker.pkg.dev/roboto-guilliman/roboto-guilliman/api
   PULUMI_STACK: main
   PLACEHOLDER_IMAGE: us-docker.pkg.dev/cloudrun/container/hello
 
