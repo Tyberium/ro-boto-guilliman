@@ -113,7 +113,12 @@ cloud_run = gcp.cloudrunv2.Service(
             ),
         ],
     ),
-    opts=pulumi.ResourceOptions(depends_on=[vector_index]),
+    opts=pulumi.ResourceOptions(
+        depends_on=[vector_index],
+        # CI deploys container images with gcloud; Pulumi owns service shell + env.
+        ignore_changes=["template.containers[0].image"],
+        custom_timeouts=pulumi.CustomTimeouts(update="10m"),
+    ),
 )
 
 # Public Cloud Run URL; lock down at the app layer with Firebase ID tokens (see docs).

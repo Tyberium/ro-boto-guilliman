@@ -115,14 +115,6 @@ jobs:
           pulumi config set gcp:project "${{ env.GCP_PROJECT_ID }}"
           pulumi config set gcp:region "${{ env.GCP_REGION }}"
 
-      - name: Refresh Pulumi state (best-effort)
-        working-directory: infra/pulumi
-        timeout-minutes: 4
-        continue-on-error: true
-        env:
-          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-        run: pulumi refresh --yes
-
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet
 
@@ -144,11 +136,17 @@ jobs:
 
       - name: Deploy with Pulumi
         working-directory: infra/pulumi
+        timeout-minutes: 10
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: pulumi up --yes --skip-preview
+
+      - name: Deploy Cloud Run image
         run: |
-          pulumi config set image "${{ env.ARTIFACT_REGISTRY }}:sha-${{ github.sha }}"
-          pulumi up --yes
+          gcloud run services update roboto-guilliman \
+            --project="${{ env.GCP_PROJECT_ID }}" \
+            --region="${{ env.GCP_REGION }}" \
+            --image="${{ env.ARTIFACT_REGISTRY }}:sha-${{ github.sha }}"
 
       - name: Smoke test
         working-directory: infra/pulumi
